@@ -1,15 +1,21 @@
 import Init.Classical
+import AssertCmd
 
 namespace EVM
+
+deriving instance Repr for ByteArray
+deriving instance DecidableEq for ByteArray
 
 structure PushArg where
   bytes : ByteArray
   pf : bytes.size > 0 ∧ bytes.size <= 32
 
-deriving instance Repr for ByteArray
+instance : BEq PushArg := { beq := fun a b => a.bytes == b.bytes }
 
 instance : Repr PushArg where
   reprPrec x n := reprPrec x.bytes n
+
+-- instance 
 
 inductive InstrExpr where
 | IAdd
@@ -38,7 +44,7 @@ inductive InstrExpr where
 | IShr
 | ISar
 | ISha3
-deriving Repr
+deriving Repr, BEq
 
 inductive InstrCtxt where
 | IAddress
@@ -66,7 +72,7 @@ inductive InstrCtxt where
 | IChainid
 | ISelfbalance
 | IBasefee
-deriving Repr
+deriving Repr, BEq
 
 inductive InstrMem where
 | IPop
@@ -75,7 +81,7 @@ inductive InstrMem where
 | IMstore8
 | ISload
 | ISstore
-deriving Repr
+deriving Repr, BEq
 
 inductive InstrOther where
 | IStop
@@ -99,14 +105,14 @@ inductive InstrOther where
 | IRevert
 | IInvalid
 | ISelfdestruct
-deriving Repr
+deriving Repr, BEq
 
 inductive Instruction where
 | expr (i : InstrExpr)
 | ctxt (i : InstrCtxt)
 | mem (i : InstrMem)
 | other (i : InstrOther)
-deriving Repr
+deriving Repr, BEq
 
 #print Coe
 
@@ -192,7 +198,7 @@ def encode (i: Instruction) : ByteArray := match i with
   | InstrOther.IMsize => ofOne 0x59
   | InstrOther.IGas => ofOne 0x5a
   | InstrOther.IJumpdest => ofOne 0x5b
-  | InstrOther.IPush arg => (ofOne (0x60 + arg.bytes.size.toUInt8)) ++ arg.bytes
+  | InstrOther.IPush arg => (ofOne (0x60 + arg.bytes.size.toUInt8 - 1)) ++ arg.bytes
   | InstrOther.IDup n => ofOne (0x80 + n.val.toUInt8)
   | InstrOther.ISwap n => ofOne (0x90 + n.val.toUInt8)
   | InstrOther.ILog 0 => ofOne 0xa0
@@ -220,7 +226,7 @@ private def get? (b: ByteArray) (i: Nat) : Option UInt8 := dite (i < b.size) (fu
 @[simp] private theorem extractSize (b: ByteArray) (n: Nat) (h: b.size >= n) a : (b.extract a n).size = n - a := by
   admit
 
-@[simp] private theorem pff (b: ByteArray) n (h1: n <= 32) (h3: b.size >= n): (b.extract 1 n).size > 0 ∧ (b.extract 1 n).size <= 32 := by
+@[simp] private theorem pff (b: ByteArray) n (h1: n <= 32) (h3: b.size >= n): (b.extract 1 (n+1)).size > 0 ∧ (b.extract 1 (n+1)).size <= 32 := by
   -- rw [extractSize b n h3 1]
   -- simp
   admit
@@ -232,7 +238,7 @@ private def btailn (b: ByteArray) n := b.extract n b.size
 
 private def taken? (b: ByteArray) n (h: n <= 32) : Option Instruction × ByteArray :=
   dite (b.size >= n)
-    (fun pf => (Instruction.other $ InstrOther.IPush { bytes := b.extract 1 n, pf := pff b n h pf}, btailn b n ))
+    (fun pf => (Instruction.other $ InstrOther.IPush { bytes := b.extract 1 (n+1), pf := pff b n h pf}, btailn b (n+1) ))
     (fun _ => (none, b)) 
 
 private theorem t0lt32 : 0 <= 32 := by simp
@@ -514,10 +520,8 @@ private theorem encDecIPush (n: PushArg) : decode (encode (IPush n)) = (some (In
   simp [encode, ofOne]
   admit
 
-#eval (encode (IPush { bytes := ByteArray.mk #[0x01, 0x02, 0x02], pf := sorry } )).data == (ByteArray.mk #[0x97, 0x01, 0x02, 0x02]).data
-#eval decode (encode (IPush { bytes := ByteArray.mk #[0x01, 0x02, 0x02], pf := sorry } ))
--- #eval encode (IPush { bytes := ByteArray.mk #[0x00, 0x00, 0x00,], pf := sorry } )
-
+#assert (encode (IPush { bytes := ByteArray.mk #[0x01, 0x02, 0x02], pf := sorry } )).data == (ByteArray.mk #[0x62, 0x01, 0x02, 0x02]).data
+-- #assert (decode (encode (IPush { bytes := ByteArray.mk #[0x01, 0x02, 0x02], pf := sorry } ))).fst == (some $ Instruction.other $ IPush { bytes := ByteArray.mk #[0x01, 0x02, 0x02], pf := sorry })
 
 private theorem encDecIDup (n: Fin 16) : decode (encode (IDup n)) = (some (Instruction.other $ IDup n), ByteArray.empty) := by
   simp [encode, ofOne]

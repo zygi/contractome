@@ -1,6 +1,8 @@
 import AssertCmd
+import Contractome.Utils
 
-@[irreducible] def UInt256.size : Nat := 115792089237316195423570985008687907853269984665640564039457584007913129639936
+-- @[irreducible] def UInt256.size : Nat := 115792089237316195423570985008687907853269984665640564039457584007913129639936
+@[irreducible] def UInt256.size : Nat := 2^256
 -- attribute [irreducible] UInt32.size
 
 structure UInt256 where
@@ -22,6 +24,7 @@ def UInt256.decEq (a b : UInt256) : Decidable (Eq a b) :=
 
 instance : DecidableEq UInt256 := UInt256.decEq
 
+set_option maxRecDepth 2000
 instance : Inhabited UInt256 where
   default := UInt256.ofNatCore 0 (by decide)
 
@@ -48,24 +51,34 @@ instance : Ord UInt256 where
 
 #check UInt32.ofNat
 
-def UInt256.ofNat (n : @& Nat) : UInt256 := ⟨⟨n, sorry⟩⟩
+@[irreducible] theorem ofNat_lt (x: Nat) : x % UInt256.size < UInt256.size := by
+  simp [Nat.mod_lt, Nat.zero_lt_succ]
+
+-- attribute [irreducible] Fin.mlt
+
+-- def UInt256.ofNat (n : @& Nat) : UInt256 := ⟨Fin.ofNat n⟩
+def UInt256.ofNat (n : @& Nat) : UInt256 := ⟨⟨n % UInt256.size , ofNat_lt n⟩⟩
 def UInt256.ofNat' (n : Nat) (h : n < UInt256.size) : UInt256 := ⟨⟨n, h⟩⟩
-def UInt256.ofUInt8 (n : UInt8) : UInt256 := ⟨⟨n.val, sorry⟩⟩
+def UInt256.ofUInt8 (n : UInt8) : UInt256 := ⟨⟨ n.val, by apply (Nat.lt_trans n.val.isLt); decide ⟩⟩
 abbrev Nat.toUInt256 := UInt256.ofNat
-def UInt256.add (a b : UInt256) : UInt256 := ⟨a.val + b.val⟩
-def UInt256.sub (a b : UInt256) : UInt256 := ⟨a.val - b.val⟩
-def UInt256.mul (a b : UInt256) : UInt256 := ⟨a.val * b.val⟩
-def UInt256.div (a b : UInt256) : UInt256 := ⟨a.val / b.val⟩
-def UInt256.mod (a b : UInt256) : UInt256 := ⟨a.val % b.val⟩
+
+@[inline] abbrev wrapOp (f : Nat -> Nat -> Nat) :=
+  fun (a b : UInt256)  => UInt256.mk ⟨ (f a.val.val b.val.val) % UInt256.size, ofNat_lt (f a.val.val b.val.val) ⟩
+
+def UInt256.add := wrapOp Nat.add
+def UInt256.sub (a b : UInt256) : UInt256 := ⟨⟨ (a.val.val + (UInt256.size - b.val.val)) % UInt256.size , ofNat_lt _⟩⟩
+def UInt256.mul := wrapOp Nat.mul
+def UInt256.div := wrapOp Nat.div
+def UInt256.mod := wrapOp Nat.mod
 
 set_option maxRecDepth 2000
 def UInt256.ones : UInt256 := ⟨⟨ (2^256) - 1, by decide ⟩⟩ 
-def UInt256.modn (a : UInt256) (n : @& Nat) : UInt256 := ⟨a.val % n⟩
-def UInt256.land (a b : UInt256) : UInt256 := ⟨Fin.land a.val b.val⟩
-def UInt256.lor (a b : UInt256) : UInt256 := ⟨Fin.lor a.val b.val⟩
-def UInt256.xor (a b : UInt256) : UInt256 := ⟨Fin.xor a.val b.val⟩
-def UInt256.shiftLeft (a b : UInt256) : UInt256 := ⟨a.val <<< (modn b 256).val⟩
-def UInt256.shiftRight (a b : UInt256) : UInt256 := ⟨a.val >>> (modn b 256).val⟩
+def UInt256.modn (a : UInt256) (n : @& Nat) : UInt256 := ⟨⟨ (a.val.val % n) % UInt256.size, ofNat_lt _ ⟩⟩
+def UInt256.land := wrapOp Nat.land
+def UInt256.lor := wrapOp Nat.lor
+def UInt256.xor := wrapOp Nat.xor
+def UInt256.shiftLeft (a b : UInt256) : UInt256 := ⟨⟨ (a.val.val <<< (modn b 256).val.val) % UInt256.size, ofNat_lt _ ⟩⟩
+def UInt256.shiftRight (a b : UInt256) : UInt256 := ⟨⟨ (a.val.val >>> (modn b 256).val.val) % UInt256.size, ofNat_lt _ ⟩⟩
 def UInt256.toUInt8 (a : UInt256) : UInt8 := a.toNat.toUInt8
 def UInt256.toUInt16 (a : UInt256) : UInt16 := a.toNat.toUInt16
 def UInt8.toUInt256 (a : UInt8) : UInt256 := a.toNat.toUInt256
@@ -165,10 +178,9 @@ def UInt256.slt (a b: UInt256) : Bool :=
 
 def UInt256.sgt (a b: UInt256) : Bool := if a == b then false else !UInt256.slt a b
 
-#print UInt64.ofNat
 
 def UInt256.ofBytes! (b: ByteArray) : UInt256 := 
-  let bs := ByteArray.mkEmpty (256 / 8)
+  let bs := ByteArray.mkZeros (256 / 8)
   let destOff := (256 / 8) - b.size 
   let bs : ByteArray := ByteArray.copySlice b 0 bs destOff b.size
   -- now we can go byte by byte
@@ -179,40 +191,48 @@ def UInt256.ofBytes! (b: ByteArray) : UInt256 :=
 
   (p1 <<< 192) ||| (p2 <<< 128) ||| (p3 <<< 64) ||| p4
 
+
+def UInt256.ofBytesL! (l : List UInt8) : UInt256 := 
+  let rec aux l (acc: UInt256) := match l with
+  | List.cons b bs => aux bs ((acc <<< 8) ||| (UInt256.ofUInt8 b))
+  | List.nil => acc
+  aux l 0
+
+
+#assert (UInt256.ofBytes! $ ByteArray.mk $ #[01]) == (1:UInt256)
 #assert (UInt256.ofBytes! $ ByteArray.mk $ #[0]) == (0:UInt256)
 #assert (UInt256.ofBytes! $ ByteArray.mk $ #[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 
-0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 
-0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 
-0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 
-0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 
-0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 
-0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 
-0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 
-0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 
-0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 
-0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 
-0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 
-0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 
 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 
 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 
 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]) == UInt256.ofNat $ UInt256.size - 1
 #assert (UInt256.ofBytes! $ ByteArray.mk $ #[0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]) == UInt256.ofNat $ UInt256.size / 2
+
+#assert (UInt256.ofBytesL! $ [0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]) == UInt256.ofNat $ UInt256.size / 2
 
+def UInt256.toBytes (b: UInt256) : ByteArray := Id.run do
+  let mut ba := ByteArray.mkEmpty 32
+  for i in [0:32] do
+    ba := ba.push $ UInt256.toUInt8 $ (b <<< (8 * (UInt256.ofNat i))) >>> (8*31)
+  ba
+
+#assert (UInt256.ofBytes! (UInt256.toBytes 5)) == (5:UInt256)
+#assert (UInt256.ofBytes! (UInt256.toBytes (UInt256.ofNat $ UInt256.size - 1))) == (UInt256.ofNat $ UInt256.size - 1)
+
+def UInt256.toBytesL (b: UInt256) : List UInt8 := Id.run do
+  let mut ba := []
+  for i in [0:32] do
+    ba := List.cons (UInt256.toUInt8 $ (b <<< (8 * (UInt256.ofNat i))) >>> (8*31)) ba
+  ba.reverse
+
+#assert (UInt256.ofBytesL! (UInt256.toBytesL 5)) == (5:UInt256)
+#assert ((UInt256.toBytesL 5).drop 31).head? == (Option.some (5:UInt8))
+#assert (UInt256.ofBytesL! (UInt256.toBytesL (UInt256.ofNat $ UInt256.size - 1))) == (UInt256.ofNat $ UInt256.size - 1)
 
 def UInt256.signextend (byteNum x : UInt256) :=
   if byteNum > 31 then x else

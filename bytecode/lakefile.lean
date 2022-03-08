@@ -2,5 +2,9 @@ import Lake
 open Lake DSL
 
 package bytecode {
-  -- add configuration options here
+  dependencies := #[
+  {
+    name := `assertCmd
+    src := Source.git "https://github.com/pnwamk/lean4-assert-command" "main"
+  }]
 }
